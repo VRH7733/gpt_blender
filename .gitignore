@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.env
+
+# Blender
+*.blend1
+*.blend2
+*.blend@
+*.blend.tmp
+*.blend.lock
+.blender_backup/
+checkpoints/
+*.blend[0-9]
+*.autosave
+*.crash.txt
+
+# Logs / state
+output.txt
+scene_data.json
+task_memory.json
+selected.json
+queue.txt
+control.txt
+run_now.txt
+input.txt
+command_history.jsonl
+
+# OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
