@@ -456,11 +456,13 @@ class GPTBridgePanel(bpy.types.Panel):
 
         # Safety Net Checkpoints
         layout.separator()
-        layout.label(text="Safety Net Checkpoints")
-        row = layout.row(align=True)
-        row.prop(context.scene, "chatgpt_checkpoint_freq")
+        layout.label(text="Safety Net Checkpoints:")
+        layout.prop(context.scene, "chatgpt_checkpoint_freq")
         layout.label(text=f"Last: {context.scene.chatgpt_last_checkpoint or 'None'}")
-        layout.operator("chatgpt.revert_checkpoint", icon="FILE_REFRESH")
+        row = layout.row(align=True)
+        row.operator("chatgpt.save_checkpoint_now", text="Save Checkpoint Now", icon="FILE_TICK")
+        row.operator("chatgpt.revert_checkpoint", text="Revert", icon="FILE_REFRESH")
+
 
         # Queue & Macros
         layout.separator()
@@ -498,6 +500,16 @@ class GPTBridgeRevertCheckpoint(bpy.types.Operator):
             self.report({'WARNING'}, "No checkpoint file found")
             return {'CANCELLED'}
 
+class GPTBridgeSaveCheckpointNow(bpy.types.Operator):
+    bl_idname = "chatgpt.save_checkpoint_now"
+    bl_label = "Save Checkpoint Now"
+    bl_description = "Queue a checkpoint save immediately (non-blocking)"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        enqueue_checkpoint()  # just queue; actual save happens in checkpoint_poller()
+        self.report({'INFO'}, "Checkpoint queued")
+        return {'FINISHED'}
 
 
 class GPTBridgeToggle(bpy.types.Operator):
@@ -820,6 +832,8 @@ def register():
     bpy.utils.register_class(GPTCopySceneData)
     bpy.utils.register_class(GPTBridgeRevertCheckpoint)
     # start the non-blocking checkpoint timer
+    bpy.utils.register_class(GPTBridgeSaveCheckpointNow)
+
     bpy.app.timers.register(checkpoint_poller, persistent=True)
 
     bpy.utils.register_class(GPTPinActive)
@@ -861,7 +875,8 @@ def unregister():
     for cls in (
         GPTBridgePanel, GPTBridgeToggle, GPTRunInputNow, GPTQuickSend, GPTCopySceneData,
         GPTQueueAdd, GPTQueueClear, GPTMacroToggle, GPTMacroSave, GPTMacroPlay,
-        GPTAgentPause, GPTAgentResume, GPTAgentStep, GPTAgentStop, GPTBridgeRevertCheckpoint, GPTPinActive, GPTAgentStop, GPTBridgeRevertCheckpoint, GPTPinActive
+        GPTAgentPause , GPTAgentResume , GPTAgentStep , GPTAgentStop , GPTBridgeRevertCheckpoint , GPTPinActive , GPTBridgeSaveCheckpointNow
+
 
     ):
         bpy.utils.unregister_class(cls)
