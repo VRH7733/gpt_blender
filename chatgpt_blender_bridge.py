@@ -204,48 +204,46 @@ def run_chatgpt_command():
 
         def run_command_safe(code):
             def _run():
-                #
-                try:
-                    # run the command once
-                    exec(code, {"bpy": bpy})
-                
-                    # Animator hook (loc/rot/scale + frame advance if enabled)
-                    _animator_keyframe_and_advance()
-                
-                    # Safety Net checkpoint counter (non-blocking queue)
-                    scene = bpy.context.scene
-                    scene.chatgpt_checkpoint_count += 1
-                    freq = scene.chatgpt_checkpoint_freq
-                    if freq > 0 and scene.chatgpt_checkpoint_count >= freq:
-                        enqueue_checkpoint()
-                        scene.chatgpt_checkpoint_count = 0
-                
-                    with open(OUTPUT_FILE, "a", encoding="utf-8") as out:
-                        out.write("\n✅ Success\n")
-                
-                    # Macro recording
-                    global _macro_recording, _macro_buffer
-                    if _macro_recording:
-                        _macro_buffer.append(code)
-                
-                except Exception as e:
-                    with open(OUTPUT_FILE, "a", encoding="utf-8") as out:
-                        out.write(f"\n❌ Runtime Error: {str(e)}\n")
-                
-                # Always refresh context files
-                export_scene_info()
-                export_scene_json()
+              try:
+                  # ✅ Single exec (remove any duplicate exec and extra ✅ lines)
+                  exec(code, {"bpy": bpy})
+                  with open(OUTPUT_FILE, "a", encoding="utf-8") as out:
+                      out.write("\n✅ Success\n")
 
-                try:
-                    with open(SCENE_JSON_FILE, "r", encoding="utf-8") as f:
-                        scene_snapshot = json.load(f)
-                    log_task_to_memory(code, scene_snapshot)
-                except Exception as e:
-                    print(f"❌ Failed to load scene for task log: {e}")
+                  # Animator hook: keyframe + frame advance (centralized)
+                  _animator_keyframe_and_advance()
 
-                return None
+                  # Safety Net Checkpoint counter (non-blocking enqueue)
+                  scene = bpy.context.scene
+                  scene.chatgpt_checkpoint_count += 1
+                  freq = scene.chatgpt_checkpoint_freq
+                  if freq > 0 and scene.chatgpt_checkpoint_count >= freq:
+                      enqueue_checkpoint()
+                      scene.chatgpt_checkpoint_count = 0
 
-            bpy.app.timers.register(_run)
+                  # Macro recorder (if ON)
+                  global _macro_recording, _macro_buffer
+                  if _macro_recording:
+                      _macro_buffer.append(code)
+
+              except Exception as e:
+                  with open(OUTPUT_FILE, "a", encoding="utf-8") as out:
+                      out.write(f"\n❌ Runtime Error: {str(e)}\n")
+
+              export_scene_info()
+              export_scene_json()
+
+              try:
+                  with open(SCENE_JSON_FILE, "r", encoding="utf-8") as f:
+                      scene_snapshot = json.load(f)
+                  log_task_to_memory(code, scene_snapshot)
+              except Exception as e:
+                  print(f"❌ Failed to load scene for task log: {e}")
+
+              return None
+
+            bpy.app.timers.register(_run, persistent=True)
+
 
         run_command_safe(command)
 
