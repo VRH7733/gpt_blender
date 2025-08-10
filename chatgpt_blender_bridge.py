@@ -179,6 +179,7 @@ def checkpoint_poller():
 
 # === Run Code from input.txt ===
 # === Run Code from input.txt ===
+
 def run_chatgpt_command():
     global _last_command
     print("📨 Polling input.txt...")
@@ -195,7 +196,6 @@ def run_chatgpt_command():
             print("ℹ️ input.txt is empty")
             return
 
-        # Allow repeats (agent adds a unique runid comment)
         _last_command = command
         print("🔁 New command detected")
 
@@ -204,48 +204,46 @@ def run_chatgpt_command():
 
         def run_command_safe(code):
             def _run():
-              try:
-                  # ✅ Single exec (remove any duplicate exec and extra ✅ lines)
-                  exec(code, {"bpy": bpy})
-                  with open(OUTPUT_FILE, "a", encoding="utf-8") as out:
-                      out.write("\n✅ Success\n")
+                try:
+                    exec(code, {"bpy": bpy})
+                    with open(OUTPUT_FILE, "a", encoding="utf-8") as out:
+                        out.write("\n✅ Success\n")
 
-                  # Animator hook: keyframe + frame advance (centralized)
-                  _animator_keyframe_and_advance()
+                    _animator_keyframe_and_advance()
 
-                  # Safety Net Checkpoint counter (non-blocking enqueue)
-                  scene = bpy.context.scene
-                  scene.chatgpt_checkpoint_count += 1
-                  freq = scene.chatgpt_checkpoint_freq
-                  if freq > 0 and scene.chatgpt_checkpoint_count >= freq:
-                      enqueue_checkpoint()
-                      scene.chatgpt_checkpoint_count = 0
+                    scene = bpy.context.scene
+                    scene.chatgpt_checkpoint_count += 1
+                    freq = scene.chatgpt_checkpoint_freq
+                    if freq > 0 and scene.chatgpt_checkpoint_count >= freq:
+                        enqueue_checkpoint()
+                        scene.chatgpt_checkpoint_count = 0
 
-                  # Macro recorder (if ON)
-                  global _macro_recording, _macro_buffer
-                  if _macro_recording:
-                      _macro_buffer.append(code)
+                    global _macro_recording, _macro_buffer
+                    if _macro_recording:
+                        _macro_buffer.append(code)
 
-              except Exception as e:
-                  with open(OUTPUT_FILE, "a", encoding="utf-8") as out:
-                      out.write(f"\n❌ Runtime Error: {str(e)}\n")
+                except Exception as e:
+                    with open(OUTPUT_FILE, "a", encoding="utf-8") as out:
+                        out.write(f"\n❌ Runtime Error: {str(e)}\n")
 
-              export_scene_info()
-              export_scene_json()
+                export_scene_info()
+                export_scene_json()
 
-              try:
-                  with open(SCENE_JSON_FILE, "r", encoding="utf-8") as f:
-                      scene_snapshot = json.load(f)
-                  log_task_to_memory(code, scene_snapshot)
-              except Exception as e:
-                  print(f"❌ Failed to load scene for task log: {e}")
+                try:
+                    with open(SCENE_JSON_FILE, "r", encoding="utf-8") as f:
+                        scene_snapshot = json.load(f)
+                    log_task_to_memory(code, scene_snapshot)
+                except Exception as e:
+                    print(f"❌ Failed to load scene for task log: {e}")
 
-              return None
-
+                return None
             bpy.app.timers.register(_run, persistent=True)
 
-
         run_command_safe(command)
+
+    except Exception as e:
+        print(f"❌ Top-level bridge error: {str(e)}")
+
 
     except Exception as e:
         print(f"❌ Top-level bridge error: {str(e)}")
@@ -863,7 +861,7 @@ def unregister():
     for cls in (
         GPTBridgePanel, GPTBridgeToggle, GPTRunInputNow, GPTQuickSend, GPTCopySceneData,
         GPTQueueAdd, GPTQueueClear, GPTMacroToggle, GPTMacroSave, GPTMacroPlay,
-        GPTAgentPause, GPTAgentResume, GPTAgentStep, GPTAgentStop, GPTBridgeRevertCheckpoint, GPTAgentStop, GPTBridgeRevertCheckpoint, GPTPinActive
+        GPTAgentPause, GPTAgentResume, GPTAgentStep, GPTAgentStop, GPTBridgeRevertCheckpoint, GPTPinActive, GPTAgentStop, GPTBridgeRevertCheckpoint, GPTPinActive
 
     ):
         bpy.utils.unregister_class(cls)
