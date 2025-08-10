@@ -58,7 +58,7 @@ def _read_behavior():
     fast          = bool(beh.get("fast", True))
     delay_ms      = int(beh.get("delay_ms", 500))
     burst_size    = int(beh.get("burst_size", 5))
-    confirm_every = int(beh.get("confirm_every", 1))
+    confirm_every = int(beh.get("confirm_every", 3))
     if burst_size < 1: burst_size = 1
     if confirm_every < 1: confirm_every = 1
     return fast, max(0, delay_ms), burst_size, confirm_every
