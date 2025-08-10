@@ -1,0 +1,265 @@
+diff --git a/chatgpt_blender_bridge.py b/chatgpt_blender_bridge.py
+index 1111111..2222222 100644
+--- a/chatgpt_blender_bridge.py
++++ b/chatgpt_blender_bridge.py
+@@ -1,6 +1,6 @@
+ # ✅ ChatGPT-Blender Bridge 
+ import pyperclip
+ import bpy
+-import os
+-import threading
++import os
++import threading
+ import datetime
+ import json
+ 
+@@ -38,6 +38,7 @@ CHECKPOINTS_DIR = os.path.join(FOLDER, "checkpoints")
+ checkpoint_counter = 0
+ # Selection poll (keeps selected.json fresh even without depsgraph events)
+ _SELECTION_POLL_SEC = 0.25
++_checkpoint_queue = []  # queued checkpoint save paths (non-blocking)
+ 
+ _macro_recording = False
+ _macro_buffer = []
+@@ -160,7 +161,7 @@ def checkpoint_poller():
+         if _checkpoint_queue:
+             path = _checkpoint_queue.pop(0)
+             try:
+-                bpy.ops.wm.save_as_mainfile(filepath=path, copy=True)
++                bpy.ops.wm.save_as_mainfile(filepath=path, copy=True)
+                 print(f"💾 Checkpoint saved → {path}")
+             except Exception as e:
+                 print(f"❌ Checkpoint save failed: {e}")
+@@ -191,38 +192,29 @@ def run_chatgpt_command():
+         with open(OUTPUT_FILE, "w", encoding="utf-8") as out:
+             out.write("Running command...\n")
+ 
+-        def run_command_safe(code):
++        def run_command_safe(code):
+             def _run():
+                 try:
+-                    exec(code, {"bpy": bpy})
+-
+-                    try:
+-                        exec(code, {"bpy": bpy})
+-                        with open(OUTPUT_FILE, "a", encoding="utf-8") as out:
+-                            out.write("\n✅ Success\n")
+-
+-                        # >>> NEW: Animator hook
+-                        _animator_keyframe_and_advance()
+-
+-                    except Exception as e:
+-                        with open(OUTPUT_FILE, "a", encoding="utf-8") as out:
+-                            out.write(f"\n❌ Runtime Error: {str(e)}\n")
+-
+-                    
+-                    # Animator Mode logic
+-                    if bpy.context.scene.chatgpt_animator_mode:
+-                        channels = bpy.context.scene.chatgpt_anim_channels
+-                        objs = []
+-                        if bpy.context.view_layer.objects.active:
+-                            objs.append(bpy.context.view_layer.objects.active)
+-                        for o in bpy.context.selected_objects:
+-                            if o not in objs:
+-                                objs.append(o)
+-                        for o in objs:
+-                            if o:
+-                                if channels in ("LOC", "LOCROT", "LOCROTSCALE"):
+-                                    o.keyframe_insert(data_path="location")
+-                                if channels in ("LOCROT", "LOCROTSCALE"):
+-                                    o.keyframe_insert(data_path="rotation_euler")
+-                                if channels in ("LOCROTSCALE",):
+-                                    o.keyframe_insert(data_path="scale")
+-                        bpy.context.scene.frame_current += int(bpy.context.scene.chatgpt_anim_step)
+-                        # === Safety Net Checkpoints ===
+-                        # === Safety Net Checkpoints (non-blocking) ===
+-                        scene = bpy.context.scene
+-                        scene.chatgpt_checkpoint_count += 1
+-                        freq = scene.chatgpt_checkpoint_freq
+-                        if freq > 0 and scene.chatgpt_checkpoint_count >= freq:
+-                            enqueue_checkpoint()                     # queue it, don’t save here
+-                            scene.chatgpt_checkpoint_count = 0
+-
+-                        
+-                    with open(OUTPUT_FILE, "a", encoding="utf-8") as out:
+-                        out.write("\n✅ Success\n")
+-                                            # If recording, buffer the command as a macro step
++                    # ✅ Single exec (remove duplicate exec and duplicate ✅ lines)
++                    exec(code, {"bpy": bpy})
++                    with open(OUTPUT_FILE, "a", encoding="utf-8") as out:
++                        out.write("\n✅ Success\n")
++
++                    # Animator hook: keyframe + frame advance (centralized)
++                    _animator_keyframe_and_advance()
++
++                    # Safety Net Checkpoint counter (non-blocking enqueue)
++                    scene = bpy.context.scene
++                    scene.chatgpt_checkpoint_count += 1
++                    freq = scene.chatgpt_checkpoint_freq
++                    if freq > 0 and scene.chatgpt_checkpoint_count >= freq:
++                        enqueue_checkpoint()
++                        scene.chatgpt_checkpoint_count = 0
++
++                    # Macro recorder (if ON)
++                    global _macro_recording, _macro_buffer
++                    if _macro_recording:
++                        _macro_buffer.append(code)
++
+                 except Exception as e:
+                     with open(OUTPUT_FILE, "a", encoding="utf-8") as out:
+                         out.write(f"\n❌ Runtime Error: {str(e)}\n")
+@@ -239,7 +231,7 @@ def run_chatgpt_command():
+ 
+                 return None
+-            bpy.app.timers.register(_run)
++            bpy.app.timers.register(_run, persistent=True)
+ 
+         run_command_safe(command)
+ 
+@@ -260,7 +252,7 @@ def poll():
+         print("🔄 No run signal.")
+ 
+-    # Keep polling every 2 seconds
+-    return 2.0
++    # Keep polling every 2 seconds
++    return 2.0
+ 
+ 
+ class GPTQueueAdd(bpy.types.Operator):
+@@ -374,9 +366,6 @@ class GPTBridgePanel(bpy.types.Panel):
+         row.operator("wm.chatgpt_agent_step", text="STEP")
+         row.operator("wm.chatgpt_agent_stop", text="STOP")
+         
+-        layout.separator()
+-        layout.label(text="Animator")
+-        row = layout.row(align=True)
+-        row.prop(context.scene, "chatgpt_animator_mode")
+-        row.prop(context.scene, "chatgpt_animator_step")
++        # (Animator UI already present above; removed duplicate block)
+ 
+ 
+ class GPTBridgeRevertCheckpoint(bpy.types.Operator):
+@@ -430,6 +419,7 @@ class GPTPinActive(bpy.types.Operator):
+         return {'FINISHED'}
+ 
+ 
+@@ -471,30 +461,6 @@ def on_depsgraph_update(scene):
+     except Exception as e:
+         print(f"⚠️ depsgraph update failed: {e}")
+ 
+-def _ensure_props():
+-    from bpy.props import BoolProperty, StringProperty
+-    if not hasattr(bpy.types.Scene, "chatgpt_pin_focus"):
+-        bpy.types.Scene.chatgpt_pin_focus = BoolProperty(
+-            name="Pin Focus",
+-            description="Agent prefers this pinned object",
+-            default=False,
+-        )
+-    if not hasattr(bpy.types.Scene, "chatgpt_pinned_name"):
+-        bpy.types.Scene.chatgpt_pinned_name = StringProperty(
+-            name="Pinned Object",
+-            description="Name of the object to pin",
+-            default="",
+-        )
+-
+-# --- Behavior props (mode & step sizes) ---
++# --- Behavior props (mode & step sizes) ---
+ def _ensure_behavior_props():
+     from bpy.props import EnumProperty, FloatProperty, BoolProperty, IntProperty
+ 
+@@ -603,8 +569,10 @@ def register():
+     _ensure_animator_props()
+ 
+     bpy.utils.register_class(GPTBridgePanel)
+     bpy.utils.register_class(GPTBridgeToggle)
+     bpy.utils.register_class(GPTRunInputNow)
+     bpy.utils.register_class(GPTQuickSend)
+     bpy.utils.register_class(GPTCopySceneData)
++    bpy.utils.register_class(GPTPinActive)
+     bpy.utils.register_class(GPTBridgeRevertCheckpoint)
+-    # start the non-blocking checkpoint timer
+-    bpy.app.timers.register(checkpoint_poller)
++    # start the non-blocking checkpoint timer
++    bpy.app.timers.register(checkpoint_poller, persistent=True)
+ 
+     bpy.utils.register_class(GPTQueueAdd)
+     bpy.utils.register_class(GPTQueueClear)
+@@ -626,7 +594,7 @@ def register():
+     export_scene_json()
+     write_selection_snapshot()
+     # start lightweight selection poll
+     try:
+-        bpy.app.timers.register(_poll_selection_timer, persistent=True)
++        bpy.app.timers.register(_poll_selection_timer, persistent=True)
+     except Exception as e:
+         print(f"⚠️ failed to start selection poll: {e}")
+ 
+@@ -644,13 +612,14 @@ def unregister():
+         GPTQueueAdd, GPTQueueClear, GPTMacroToggle, GPTMacroSave, GPTMacroPlay,
+         GPTAgentPause, GPTAgentResume, GPTAgentStep, GPTAgentStop, GPTBridgeRevertCheckpoint
+     ):
+         bpy.utils.unregister_class(cls)
+ 
+     for prop in (
+         "chatgpt_quick_command", "chatgpt_action_mode",
+         "chatgpt_fast_mode", "chatgpt_delay_ms",
+         "chatgpt_pin_focus", "chatgpt_pinned_name",
+         "chatgpt_burst_size", "chatgpt_confirm_every",
+         "chatgpt_animator_mode", "chatgpt_anim_step", "chatgpt_anim_channels",
+         "chatgpt_checkpoint_freq", "chatgpt_checkpoint_count", "chatgpt_last_checkpoint",
+-         "chatgpt_animator_step"
++        "chatgpt_animator_step"
+     ):
+         if hasattr(bpy.types.Scene, prop):
+             delattr(bpy.types.Scene, prop)
+diff --git a/agent_loop.py b/agent_loop.py
+index 3333333..4444444 100644
+--- a/agent_loop.py
++++ b/agent_loop.py
+@@ -1,6 +1,7 @@
+-# agent_loop.py — fast burst queue agent
+-import os, time, json
+-import re
++# agent_loop.py — fast burst queue agent
++import os, time, json
++import re
++
+ FOLDER = r"C:\Users\master\Desktop\chatgpt_blender_bridge"
+ INPUT_FILE    = os.path.join(FOLDER, "input.txt")
+ RUN_FILE      = os.path.join(FOLDER, "run_now.txt")
+@@ -18,6 +19,7 @@ def _read_text(path):
+     except:
+         return ""
+ 
++
+ def _mtime(path):
+     try:
+         return os.path.getmtime(path)
+@@ -64,6 +66,10 @@ def _write_input_and_trigger(cmd):
+     with open(RUN_FILE, "w", encoding="utf-8") as f:
+         f.write("run")
+ 
++    # tiny yield so Blender timer can fire quickly in fast mode
++    # (the bridge uses bpy.app.timers.register(..., persistent=True))
++    time.sleep(0.005)
++
+ def _wait_for_blender(prev_scene_mtime, timeout=6.0):
+     """Wait until scene_data.json changes or '✅ Success' appears in output.txt."""
+     start = time.time()
+@@ -91,7 +97,7 @@ def _read_behavior():
+     beh = sel.get("behavior", {})
+     fast = bool(beh.get("fast", True))
+     delay_ms = int(beh.get("delay_ms", 500))
+-    burst_size = int(beh.get("burst_size", 5))
++    burst_size = int(beh.get("burst_size", 10))
+     confirm_every = int(beh.get("confirm_every", 3))
+     if burst_size < 1: burst_size = 1
+     if confirm_every < 1: confirm_every = 1
+@@ -158,6 +164,7 @@ def run_agent():
+                 if not ok:
+                     print("⚠️ Blender did not confirm in time (continuing).")
+ 
++                # very short yield in fast mode
+                 if fast:
+                     time.sleep(0.01)
+ 

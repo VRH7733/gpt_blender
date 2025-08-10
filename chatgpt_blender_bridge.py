@@ -179,6 +179,7 @@ def checkpoint_poller():
 
 # === Run Code from input.txt ===
 # === Run Code from input.txt ===
+
 def run_chatgpt_command():
     global _last_command
     print("📨 Polling input.txt...")
@@ -195,7 +196,6 @@ def run_chatgpt_command():
             print("ℹ️ input.txt is empty")
             return
 
-        # Allow repeats (agent adds a unique runid comment)
         _last_command = command
         print("🔁 New command detected")
 
@@ -204,35 +204,28 @@ def run_chatgpt_command():
 
         def run_command_safe(code):
             def _run():
-                #
                 try:
-                    # run the command once
                     exec(code, {"bpy": bpy})
-                
-                    # Animator hook (loc/rot/scale + frame advance if enabled)
+                    with open(OUTPUT_FILE, "a", encoding="utf-8") as out:
+                        out.write("\n✅ Success\n")
+
                     _animator_keyframe_and_advance()
-                
-                    # Safety Net checkpoint counter (non-blocking queue)
+
                     scene = bpy.context.scene
                     scene.chatgpt_checkpoint_count += 1
                     freq = scene.chatgpt_checkpoint_freq
                     if freq > 0 and scene.chatgpt_checkpoint_count >= freq:
                         enqueue_checkpoint()
                         scene.chatgpt_checkpoint_count = 0
-                
-                    with open(OUTPUT_FILE, "a", encoding="utf-8") as out:
-                        out.write("\n✅ Success\n")
-                
-                    # Macro recording
+
                     global _macro_recording, _macro_buffer
                     if _macro_recording:
                         _macro_buffer.append(code)
-                
+
                 except Exception as e:
                     with open(OUTPUT_FILE, "a", encoding="utf-8") as out:
                         out.write(f"\n❌ Runtime Error: {str(e)}\n")
-                
-                # Always refresh context files
+
                 export_scene_info()
                 export_scene_json()
 
@@ -244,10 +237,13 @@ def run_chatgpt_command():
                     print(f"❌ Failed to load scene for task log: {e}")
 
                 return None
-
-            bpy.app.timers.register(_run)
+            bpy.app.timers.register(_run, persistent=True)
 
         run_command_safe(command)
+
+    except Exception as e:
+        print(f"❌ Top-level bridge error: {str(e)}")
+
 
     except Exception as e:
         print(f"❌ Top-level bridge error: {str(e)}")
@@ -879,8 +875,8 @@ def unregister():
     for cls in (
         GPTBridgePanel, GPTBridgeToggle, GPTRunInputNow, GPTQuickSend, GPTCopySceneData,
         GPTQueueAdd, GPTQueueClear, GPTMacroToggle, GPTMacroSave, GPTMacroPlay,
-        GPTAgentPause, GPTAgentResume, GPTAgentStep, GPTAgentStop, GPTBridgeRevertCheckpoint, GPTPinActive,
-        GPTBridgeSaveCheckpointNow
+        GPTAgentPause , GPTAgentResume , GPTAgentStep , GPTAgentStop , GPTBridgeRevertCheckpoint , GPTPinActive , GPTBridgeSaveCheckpointNow
+
 
     ):
         bpy.utils.unregister_class(cls)
