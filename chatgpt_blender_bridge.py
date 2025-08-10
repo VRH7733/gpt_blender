@@ -204,33 +204,34 @@ def run_chatgpt_command():
 
         def run_command_safe(code):
             def _run():
+                #
                 try:
-                    # Run the incoming code
+                    # run the command once
                     exec(code, {"bpy": bpy})
-
-                    # Animator: keyframe & advance (if enabled)
+                
+                    # Animator hook (loc/rot/scale + frame advance if enabled)
                     _animator_keyframe_and_advance()
-
-                    # Safety Net: count + enqueue checkpoint if needed
+                
+                    # Safety Net checkpoint counter (non-blocking queue)
                     scene = bpy.context.scene
                     scene.chatgpt_checkpoint_count += 1
                     freq = scene.chatgpt_checkpoint_freq
                     if freq > 0 and scene.chatgpt_checkpoint_count >= freq:
                         enqueue_checkpoint()
                         scene.chatgpt_checkpoint_count = 0
-
-                    # Macro recording buffer
+                
+                    with open(OUTPUT_FILE, "a", encoding="utf-8") as out:
+                        out.write("\n✅ Success\n")
+                
+                    # Macro recording
                     global _macro_recording, _macro_buffer
                     if _macro_recording:
                         _macro_buffer.append(code)
-
-                    with open(OUTPUT_FILE, "a", encoding="utf-8") as out:
-                        out.write("\n✅ Success\n")
-
+                
                 except Exception as e:
                     with open(OUTPUT_FILE, "a", encoding="utf-8") as out:
                         out.write(f"\n❌ Runtime Error: {str(e)}\n")
-
+                
                 # Always refresh context files
                 export_scene_info()
                 export_scene_json()
@@ -515,7 +516,8 @@ class GPTBridgeToggle(bpy.types.Operator):
             _bridge_running = False
             self.report({'INFO'}, "Bridge stopped")
         else:
-            bpy.app.timers.register(poll)
+            bpy.app.timers.register(poll, persistent=True)
+
             _bridge_running = True
             self.report({'INFO'}, "Bridge started")
         return {'FINISHED'}
@@ -681,20 +683,7 @@ def on_depsgraph_update(scene):
     except Exception as e:
         print(f"⚠️ depsgraph update failed: {e}")
 
-def _ensure_props():
-    from bpy.props import BoolProperty, StringProperty
-    if not hasattr(bpy.types.Scene, "chatgpt_pin_focus"):
-        bpy.types.Scene.chatgpt_pin_focus = BoolProperty(
-            name="Pin Focus",
-            description="Agent prefers this pinned object",
-            default=False,
-        )
-    if not hasattr(bpy.types.Scene, "chatgpt_pinned_name"):
-        bpy.types.Scene.chatgpt_pinned_name = StringProperty(
-            name="Pinned Object",
-            description="Name of the object to pin",
-            default="",
-        )
+
 
 # --- Behavior props (mode & step sizes) ---
 def _ensure_behavior_props():
@@ -835,7 +824,8 @@ def register():
     bpy.utils.register_class(GPTCopySceneData)
     bpy.utils.register_class(GPTBridgeRevertCheckpoint)
     # start the non-blocking checkpoint timer
-    bpy.app.timers.register(checkpoint_poller)
+    bpy.app.timers.register(checkpoint_poller, persistent=True)
+
     bpy.utils.register_class(GPTPinActive)
 
     bpy.utils.register_class(GPTQueueAdd)
